@@ -35,20 +35,20 @@ Receiver::Receiver(int n_rx_threads, Config* config,
         config_->client_present(), config_->bs_present());
     this->clientRadioSet_
         = config_->client_present() ? new ClientRadioSet(config_) : nullptr;
-    this->baseRadioSet_
+    this->base_radio_set_
         = config_->bs_present() ? new BaseRadioSet(config_) : nullptr;
     MLPD_TRACE("Receiver Construction -- number radios %zu\n",
         config_->num_bs_sdrs_all());
 
-    if (((this->baseRadioSet_ != nullptr)
-            && (this->baseRadioSet_->getRadioNotFound()))
+    if (((this->base_radio_set_ != nullptr)
+            && (this->base_radio_set_->getRadioNotFound()))
         || ((this->clientRadioSet_ != nullptr)
                && (this->clientRadioSet_->getRadioNotFound()))) {
-        if (this->baseRadioSet_ != nullptr) {
+        if (this->base_radio_set_ != nullptr) {
             MLPD_WARN("Invalid Base Radio Setup: %d\n",
-                this->baseRadioSet_ == nullptr);
-            this->baseRadioSet_->radioStop();
-            delete this->baseRadioSet_;
+                this->base_radio_set_ == nullptr);
+            this->base_radio_set_->radioStop();
+            delete this->base_radio_set_;
         }
         if (this->clientRadioSet_ != nullptr) {
             MLPD_WARN("Invalid Client Radio Setup: %d\n",
@@ -64,10 +64,10 @@ Receiver::Receiver(int n_rx_threads, Config* config,
 Receiver::~Receiver()
 {
     MLPD_TRACE("Radio Set cleanup, Base: %d, Client: %d\n",
-        this->baseRadioSet_ == nullptr, this->clientRadioSet_ == nullptr);
-    if (this->baseRadioSet_ != nullptr) {
-        this->baseRadioSet_->radioStop();
-        delete this->baseRadioSet_;
+        this->base_radio_set_ == nullptr, this->clientRadioSet_ == nullptr);
+    if (this->base_radio_set_ != nullptr) {
+        this->base_radio_set_->radioStop();
+        delete this->base_radio_set_;
     }
     if (this->clientRadioSet_ != nullptr) {
         this->clientRadioSet_->radioStop();
@@ -140,8 +140,8 @@ void Receiver::completeRecvThreads(const std::vector<pthread_t>& recv_thread)
 
 void Receiver::go()
 {
-    if (baseRadioSet_ != NULL) {
-        baseRadioSet_->radioStart(); // hardware trigger
+    if (this->base_radio_set_ != NULL) {
+        this->base_radio_set_->radioStart(); // hardware trigger
     }
 }
 
@@ -257,7 +257,7 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
             size_t radio_idx = it - config_->n_bs_sdrs_agg().at(cell);
             bs_sync_ret = -1;
             while (bs_sync_ret < 0) {
-                bs_sync_ret = baseRadioSet_->radioRx(radio_idx, cell,
+                bs_sync_ret = this->base_radio_set_->radioRx(radio_idx, cell,
                     samp_buffer.data(), config_->samps_per_symbol(), rxTimeBs);
             }
         }
@@ -302,8 +302,8 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                     &pkg_buf_inuse[offs], bit); // now full
                 // if buffer was full, exit
                 if ((old & bit) != 0) {
-                    printf("thread %d buffer full\n", tid);
-                    exit(0);
+                    MLPD_ERROR("thread %d buffer full\n", tid);
+                    throw std::runtime_error("Thread %d buffer full\n");
                 }
                 // Reserved until marked empty by consumer
             }
@@ -316,14 +316,13 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                 samp[ch] = pkg[ch]->data;
             }
 
-            assert(baseRadioSet_ != NULL);
-            // ant_id = it * num_channels;
+            assert(this->base_radio_set_ != NULL);
             ant_id = radio_idx * num_channels;
 
             // Schedule BS beacons to be sent from host for USRPs
-            if (!kUseUHD) {
+            if (kUseUHD == false) {
                 long long frameTime;
-                if (baseRadioSet_->radioRx(radio_idx, cell, samp, frameTime)
+                if (this->base_radio_set_->radioRx(radio_idx, cell, samp, frameTime)
                     < 0) {
                     config_->running(false);
                     break;
@@ -351,9 +350,9 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                 // otherwise use samp_buffer as a dummy buffer
                 if (config_->isPilot(frame_id, symbol_id)
                     || config_->isData(frame_id, symbol_id))
-                    r = baseRadioSet_->radioRx(radio_idx, cell, samp, rxTimeBs);
+                    r = this->base_radio_set_->radioRx(radio_idx, cell, samp, rxTimeBs);
                 else
-                    r = baseRadioSet_->radioRx(
+                    r = this->base_radio_set_->radioRx(
                         radio_idx, cell, samp_buffer.data(), rxTimeBs);
 
                 if (r < 0) {
@@ -372,7 +371,7 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                     txTimeBs = rxTimeBs
                         + config_->samps_per_symbol()
                             * config_->symbols_per_frame() * BEACON_INTERVAL;
-                    int r_tx = baseRadioSet_->radioTx(radio_idx, cell,
+                    int r_tx = this->base_radio_set_->radioTx(radio_idx, cell,
                         beaconbuff.data(), kStreamEndBurst, txTimeBs);
                     if (r_tx != config_->samps_per_symbol())
                         std::cerr << "BAD Transmit(" << r_tx << "/"

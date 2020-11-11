@@ -512,16 +512,16 @@ size_t Config::getMaxNumAntennas()
     if (this->bs_present_ == false) {
         ret = 1;
     } else {
-        size_t maxNumSdr = 0;
-        for (size_t i = 0; i < num_cells_; i++) {
-            if (maxNumSdr < n_bs_sdrs_.at(i)) {
-                maxNumSdr = n_bs_sdrs_.at(i);
+        size_t max_num_sdr = 0;
+        for (size_t i = 0; i < this->num_cells_; i++) {
+            if (max_num_sdr < this->n_bs_sdrs_.at(i)) {
+                max_num_sdr = this->n_bs_sdrs_.at(i);
             }
-            if (reciprocal_calib_) {
-                maxNumSdr--; // exclude the ref sdr
+            if (reciprocal_calib_ == true) {
+                max_num_sdr--; // exclude the ref sdr
             }
         }
-        ret = (maxNumSdr * bs_channel_.length());
+        ret = (max_num_sdr * bs_channel_.length());
     }
     return ret;
 }
