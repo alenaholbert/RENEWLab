@@ -37,9 +37,7 @@ Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg)
     message_queue_
         = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
 
-    MLPD_TRACE("Recorder construction - rx thread: %zu, task tread %zu, chunk "
-               "size: %zu\n",
-        rx_thread_num, task_thread_num, rx_thread_buff_size_);
+    MLPD_TRACE("Recorder construction - rx thread: %zu, chunk size: %zu\n", rx_thread_num, rx_thread_buff_size_);
 
     if (rx_thread_num > 0) {
         // initialize rx buffers

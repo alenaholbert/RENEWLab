@@ -40,7 +40,7 @@ namespace Sounder
         RecorderThread::EventHandlerContext* context = new RecorderThread::EventHandlerContext();
         context->me = this;
         context->id = tid;
-        MLPD_TRACE("Launching recorder task thread with id: %zu\n", i);
+        MLPD_TRACE("Launching recorder task thread with id: %d\n", tid);
         if (pthread_create(&this->thread_, &detached_attr,
                 RecorderThread::launchThread, context)
             != 0) {

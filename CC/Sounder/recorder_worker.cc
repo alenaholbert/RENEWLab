@@ -562,14 +562,14 @@ namespace Sounder
         }
     }
 
-    herr_t RecorderWorker::record(int , Package *pkg)
+    herr_t RecorderWorker::record(int tid, Package *pkg)
     {
         /* check pkg->ant_id to see if it is in our span */
         herr_t ret = 0;
 
         //Generates a ton of messages
-        MLPD_TRACE( "Tid: %d -- Record chunk size: %zu, buffer id: %zu, buffer offset: %zu, length %zu, offset %d\n, frame_id %u, antenna: %u",
-                    tid, rx_thread_buff_size_, buffer_id, buffer_offset, package_length, offset, pkg->frame_id, pkg->ant_id);
+        MLPD_TRACE( "Tid: %d -- frame_id %u, antenna: %u",
+                    tid, pkg->frame_id, pkg->ant_id);
 
     #if DEBUG_PRINT
         printf("record            frame %d, symbol %d, cell %d, ant %d samples: %d "
