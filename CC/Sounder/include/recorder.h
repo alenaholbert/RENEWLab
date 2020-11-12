@@ -12,7 +12,7 @@
 #define DATARECORDER_HEADER
 
 #include "receiver.h"
-#include "recorder_worker.h"
+#include "recorder_thread.h"
 
 class Recorder {
 public:
@@ -36,13 +36,10 @@ private:
     SampleBuffer* rx_buffer_;
     size_t rx_thread_buff_size_;
 
-    RecorderWorker worker_;
+    //RecorderWorker worker_;
+    std::vector<Sounder::RecorderThread *> recorders_;
     size_t max_frame_number_;
-#if DEBUG_PRINT
-    hsize_t cdims_pilot[5];
-    hsize_t cdims_data[5];
-#endif
-    //moodycamel::ConcurrentQueue<Event_data> task_queue_;
+
     moodycamel::ConcurrentQueue<Event_data> message_queue_;
 };
 #endif /* DATARECORDER_HEADER */

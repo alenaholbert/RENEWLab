@@ -24,7 +24,7 @@ const int kDsSim = 5;
 #endif
 
 
-Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg), worker_(in_cfg)
+Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg)
 {
     size_t rx_thread_num = cfg_->rx_thread_num();
     size_t ant_per_rx_thread
@@ -80,7 +80,6 @@ Recorder::~Recorder() { this->gc(); }
 
 void Recorder::do_it()
 {
-    pthread_t worker_thread;
 
     MLPD_TRACE("Recorder work thread\n");
     if ((this->cfg_->core_alloc() == true) && (pin_to_core(0) != 0)) {
@@ -99,27 +98,15 @@ void Recorder::do_it()
         {
             antennas.push_back(i);
         }
-        worker_.init(antennas);
 
         size_t task_thread_num = cfg_->task_thread_num();
         if (task_thread_num > 0) {
-            pthread_attr_t detached_attr;
-            pthread_attr_init(&detached_attr);
-            pthread_attr_setdetachstate(&detached_attr, PTHREAD_CREATE_DETACHED);
-
             //Configure the worker threads.
-            // TODO: add support for multiple workers
-            //for (size_t i = 0; i < task_thread_num; i++) {
-            RecorderWorker::EventHandlerContext* context = new RecorderWorker::EventHandlerContext();
-            context->me = &this->worker_;
-            context->id = 0;
-            MLPD_TRACE("Launching recorder task thread with id: %zu\n", i);
-            if (pthread_create(&worker_thread, &detached_attr,
-                    RecorderWorker::launchThread, context)
-                != 0) {
-                delete context;
-                gc();
-                throw runtime_error("Recorder task thread create failed");
+            //TODO add antenna selection
+            for (size_t i = 0; i < task_thread_num; i++) {
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, antennas);
+                new_recorder->create(i);
+                this->recorders_.push_back(new_recorder);
             }
         }
 
@@ -149,18 +136,19 @@ void Recorder::do_it()
 
             // if EVENT_RX_SYMBOL, dispatch to proper worker
             if (event.event_type == EVENT_RX_SYMBOL) {
-                int offset = event.data;
-                RecorderWorker::RecordEventData do_record_task;
+                size_t thread_index = 0; /* TODO WARNING: needs to be based on the antenna */
+                int offset          = event.data;
+                Sounder::RecorderThread::RecordEventData do_record_task;
                 do_record_task.event_type   = TASK_RECORD;
                 do_record_task.data         = offset;
                 do_record_task.rx_buffer    = this->rx_buffer_;
                 do_record_task.rx_buff_size = this->rx_thread_buff_size_;
                 // Pass the work off to the applicable worker
-                // Worker must free the buffer, future work could involve making this cleaner
+                // Worker must free the buffer, future work would involve making this cleaner
 
                 //If no worker threads, it is possible to handle the event directly.
                 //this->worker_.handleEvent(do_record_task, 0);
-                if ( this->worker_.dispatchWork(do_record_task) == false )
+                if ( this->recorders_.at(thread_index)->dispatchWork(do_record_task) == false )
                 {
                     MLPD_ERROR("Record task enqueue failed\n");
                     throw std::runtime_error("Record task enqueue failed");
@@ -172,11 +160,12 @@ void Recorder::do_it()
     /* TODO: should we wait for the receive threads to terminate nicely? (recv_thread) */
     this->receiver_.reset();
 
-    /* TODO join the worker threads before finalizing. */
-    pthread_join(worker_thread, NULL);
-    if (this->cfg_->rx_thread_num() > 0) {
-        this->worker_.finalize();
+    /* Force the recorders to finish the data they have left and exit cleanly*/
+    for( auto recorder : this->recorders_)
+    {
+        delete recorder;
     }
+    this->recorders_.clear();
 }
 
 

@@ -127,6 +127,7 @@ set(SOUNDER_SOURCES
     receiver.cc
     recorder.cc
     recorder_worker.cc
+    recorder_thread.cc
     BaseRadioSet.cc
     BaseRadioSet-calibrate.cc
     comms-lib.cc
