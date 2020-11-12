@@ -42,86 +42,6 @@ RecorderWorker::~RecorderWorker()
 }
 
 
-void* RecorderWorker::launchThread(void *in_context)
-{
-    EventHandlerContext* context = reinterpret_cast<EventHandlerContext*>(in_context);
-    
-    auto me  = context->me;
-    auto tid = context->id;
-    delete context;
-    me->doRecording(tid, 0);
-    return nullptr;
-}
-
-/* TODO:  handle producer token better */
-//Returns true for success, false otherwise
-bool RecorderWorker::dispatchWork(RecordEventData event)
-{
-    MLPD_INFO("Dispatching work\n");
-
-    moodycamel::ProducerToken ptok(this->event_queue_);
-    bool ret = true;
-    if (this->event_queue_.try_enqueue(ptok, event) == 0) {
-        MLPD_WARN("Queue limit has reached! try to increase queue size.\n");
-        if (this->event_queue_.enqueue(ptok, event) == 0) {
-            MLPD_ERROR("Record task enqueue failed\n");
-            throw std::runtime_error("Record task enqueue failed");
-            ret = false;
-        }
-    }
-    return ret;
-}
-
-void RecorderWorker::doRecording(int tid, int core_id)
-{
-    if (this->cfg_->core_alloc() == true) {
-        MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
-        if (pin_to_core(core_id + tid) != 0) {
-            MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
-            throw std::runtime_error("Pin recording thread to core failed");
-        }
-    }
-
-    moodycamel::ConsumerToken ctok(this->event_queue_);
-    MLPD_TRACE("Recording thread: %d started\n", tid);
-
-    RecordEventData event;
-    bool ret = false;
-    while (this->cfg_->running() == true) {
-        ret = this->event_queue_.try_dequeue(event);
-
-        if (ret == true)
-        {
-            this->handleEvent(event, tid);
-        }
-    }
-}
-
-void RecorderWorker::handleEvent(RecordEventData event, int tid)
-{
-    size_t offset        = event.data;
-    size_t buffer_id     = (offset / event.rx_buff_size);
-    size_t buffer_offset = offset - (buffer_id * event.rx_buff_size);
-
-    if (event.event_type == TASK_RECORD)
-    {
-        // read info
-        size_t package_length
-            = sizeof(Package) + this->cfg_->getPackageDataLength();
-        char* cur_ptr_buffer = event.rx_buffer[buffer_id].buffer.data()
-            + (buffer_offset * package_length);
-
-        this->record(tid, reinterpret_cast<Package*>(cur_ptr_buffer));
-    }
-
-    /* Free up the buffer memory */
-    int bit = 1 << (buffer_offset % sizeof(std::atomic_int));
-    int offs = (buffer_offset / sizeof(std::atomic_int));
-    std::atomic_fetch_and(
-        &event.rx_buffer[buffer_id].pkg_buf_inuse[offs], ~bit); // now empty
-}
-
-
 void RecorderWorker::gc(void)
 {
     MLPD_TRACE("Worker Garbage collect\n");
@@ -791,4 +711,84 @@ herr_t RecorderWorker::record(int , Package *pkg)
         }
     } /* End else */
     return ret;
+}
+
+
+void* RecorderWorker::launchThread(void *in_context)
+{
+    EventHandlerContext* context = reinterpret_cast<EventHandlerContext*>(in_context);
+    
+    auto me  = context->me;
+    auto tid = context->id;
+    delete context;
+    me->doRecording(tid, 0);
+    return nullptr;
+}
+
+/* TODO:  handle producer token better */
+//Returns true for success, false otherwise
+bool RecorderWorker::dispatchWork(RecordEventData event)
+{
+    MLPD_INFO("Dispatching work\n");
+
+    moodycamel::ProducerToken ptok(this->event_queue_);
+    bool ret = true;
+    if (this->event_queue_.try_enqueue(ptok, event) == 0) {
+        MLPD_WARN("Queue limit has reached! try to increase queue size.\n");
+        if (this->event_queue_.enqueue(ptok, event) == 0) {
+            MLPD_ERROR("Record task enqueue failed\n");
+            throw std::runtime_error("Record task enqueue failed");
+            ret = false;
+        }
+    }
+    return ret;
+}
+
+void RecorderWorker::doRecording(int tid, int core_id)
+{
+    if (this->cfg_->core_alloc() == true) {
+        MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
+        if (pin_to_core(core_id + tid) != 0) {
+            MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
+            throw std::runtime_error("Pin recording thread to core failed");
+        }
+    }
+
+    moodycamel::ConsumerToken ctok(this->event_queue_);
+    MLPD_TRACE("Recording thread: %d started\n", tid);
+
+    RecordEventData event;
+    bool ret = false;
+    while (this->cfg_->running() == true) {
+        ret = this->event_queue_.try_dequeue(event);
+
+        if (ret == true)
+        {
+            this->handleEvent(event, tid);
+        }
+    }
+}
+
+void RecorderWorker::handleEvent(RecordEventData event, int tid)
+{
+    size_t offset        = event.data;
+    size_t buffer_id     = (offset / event.rx_buff_size);
+    size_t buffer_offset = offset - (buffer_id * event.rx_buff_size);
+
+    if (event.event_type == TASK_RECORD)
+    {
+        // read info
+        size_t package_length
+            = sizeof(Package) + this->cfg_->getPackageDataLength();
+        char* cur_ptr_buffer = event.rx_buffer[buffer_id].buffer.data()
+            + (buffer_offset * package_length);
+
+        this->record(tid, reinterpret_cast<Package*>(cur_ptr_buffer));
+    }
+
+    /* Free up the buffer memory */
+    int bit = 1 << (buffer_offset % sizeof(std::atomic_int));
+    int offs = (buffer_offset / sizeof(std::atomic_int));
+    std::atomic_fetch_and(
+        &event.rx_buffer[buffer_id].pkg_buf_inuse[offs], ~bit); // now empty
 }
