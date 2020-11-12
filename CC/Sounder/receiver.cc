@@ -107,8 +107,8 @@ std::vector<pthread_t> Receiver::startRecvThreads(
     assert(rx_buffer[0].buffer.size() != 0);
 
     std::vector<pthread_t> created_threads;
-    created_threads.resize(thread_num_);
-    for (int i = 0; i < thread_num_; i++) {
+    created_threads.resize(this->thread_num_);
+    for (int i = 0; i < this->thread_num_; i++) {
         // record the thread id
         ReceiverContext* context = new ReceiverContext;
         context->ptr = this;
@@ -123,7 +123,6 @@ std::vector<pthread_t> Receiver::startRecvThreads(
             throw std::runtime_error("Socket recv thread create failed");
         }
     }
-
     sleep(1);
     pthread_cond_broadcast(&cond);
     go();
@@ -405,9 +404,9 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                 // data records the position of this packet in the buffer & tid of this socket
                 // (so that task thread could know which buffer it should visit)
                 package_message.data = cursor + tid * buffer_chunk_size;
-                if (!message_queue_->enqueue(local_ptok, package_message)) {
-                    printf("socket message enqueue failed\n");
-                    exit(0);
+                if (message_queue_->enqueue(local_ptok, package_message) == false) {
+                    MLPD_ERROR("socket message enqueue failed\n");
+                    throw std::runtime_error("socket message enqueue failed");
                 }
                 cursor++;
                 cursor %= buffer_chunk_size;
@@ -416,7 +415,9 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
 
         // for UHD device update symbol_id on host
         if (kUseUHD == true)
+        {
             symbol_id++;
+        }
     }
     MLPD_SYMBOL(
         "Process %d -- Loop Rx Freed memory at: %p\n", tid, zeroes_memory);
