@@ -10,7 +10,7 @@
 #include "include/recorder_worker.h"
 #include "include/logger.h"
 #include "include/macros.h"
-//#include "include/utils.h"
+#include "include/utils.h"
 
 // pilot dataset size increment
 const int RecorderWorker::kConfigPilotExtentStep = 400;
@@ -21,18 +21,106 @@ const int RecorderWorker::kConfigDataExtentStep = 400;
 const int kDsSim = 5;
 #endif
 
-RecorderWorker::RecorderWorker(Config* in_cfg)
+RecorderWorker::RecorderWorker(Config* in_cfg) : cfg_(in_cfg)
 {
     file_ = nullptr;
     pilot_dataset_ = nullptr;
-    data_dataset_ = nullptr;
-    cfg_ = in_cfg;
+    data_dataset_  = nullptr;
+    antennas_.clear();
+}
+
+RecorderWorker::RecorderWorker(Config* in_cfg, const std::vector<unsigned>& antennas) : cfg_(in_cfg), antennas_(antennas)
+{
+    file_ = nullptr;
+    pilot_dataset_ = nullptr;
+    data_dataset_  = nullptr;
 }
 
 RecorderWorker::~RecorderWorker()
 {
     gc();
 }
+
+
+void* RecorderWorker::launchThread(void *in_context)
+{
+    EventHandlerContext* context = reinterpret_cast<EventHandlerContext*>(in_context);
+    
+    auto me  = context->me;
+    auto tid = context->id;
+    delete context;
+    me->doRecording(tid, 0);
+    return nullptr;
+}
+
+/* TODO:  handle producer token better */
+//Returns true for success, false otherwise
+bool RecorderWorker::dispatchWork(RecordEventData event)
+{
+    MLPD_INFO("Dispatching work\n");
+
+    moodycamel::ProducerToken ptok(this->event_queue_);
+    bool ret = true;
+    if (this->event_queue_.try_enqueue(ptok, event) == 0) {
+        MLPD_WARN("Queue limit has reached! try to increase queue size.\n");
+        if (this->event_queue_.enqueue(ptok, event) == 0) {
+            MLPD_ERROR("Record task enqueue failed\n");
+            throw std::runtime_error("Record task enqueue failed");
+            ret = false;
+        }
+    }
+    return ret;
+}
+
+void RecorderWorker::doRecording(int tid, int core_id)
+{
+    if (this->cfg_->core_alloc() == true) {
+        MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
+        if (pin_to_core(core_id + tid) != 0) {
+            MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
+            throw std::runtime_error("Pin recording thread to core failed");
+        }
+    }
+
+    moodycamel::ConsumerToken ctok(this->event_queue_);
+    MLPD_TRACE("Recording thread: %d started\n", tid);
+
+    RecordEventData event;
+    bool ret = false;
+    while (this->cfg_->running() == true) {
+        ret = this->event_queue_.try_dequeue(event);
+
+        if (ret == true)
+        {
+            this->handleEvent(event, tid);
+        }
+    }
+}
+
+void RecorderWorker::handleEvent(RecordEventData event, int tid)
+{
+    size_t offset        = event.data;
+    size_t buffer_id     = (offset / event.rx_buff_size);
+    size_t buffer_offset = offset - (buffer_id * event.rx_buff_size);
+
+    if (event.event_type == TASK_RECORD)
+    {
+        // read info
+        size_t package_length
+            = sizeof(Package) + this->cfg_->getPackageDataLength();
+        char* cur_ptr_buffer = event.rx_buffer[buffer_id].buffer.data()
+            + (buffer_offset * package_length);
+
+        this->record(tid, reinterpret_cast<Package*>(cur_ptr_buffer));
+    }
+
+    /* Free up the buffer memory */
+    int bit = 1 << (buffer_offset % sizeof(std::atomic_int));
+    int offs = (buffer_offset / sizeof(std::atomic_int));
+    std::atomic_fetch_and(
+        &event.rx_buffer[buffer_id].pkg_buf_inuse[offs], ~bit); // now empty
+}
+
 
 void RecorderWorker::gc(void)
 {
@@ -60,11 +148,35 @@ void RecorderWorker::gc(void)
     }
 }
 
+void RecorderWorker::init( const std::vector<unsigned>& antennas )
+{
+    //Old logic, probably remove
+    if (this->cfg_->rx_thread_num() > 0) {
+        this->antennas_ = antennas;
+        this->hdf5_name_ = this->cfg_->trace_file();
+        if (this->initHDF5() < 0)
+        {
+            throw std::runtime_error("Could not init the output file");
+        }
+        this->openHDF5();
+    }
+}
+
+void RecorderWorker::finalize( void )
+{
+    this->closeHDF5();
+    this->finishHDF5();
+}
+
 void RecorderWorker::finishHDF5()
 {
     MLPD_TRACE("Finish HD5F file\n");
-    delete this->file_;
-    this->file_ = nullptr;
+    if (this->file_ != nullptr)
+    {
+        MLPD_TRACE("Deleting the file ptr for :%s\n", hdf5_name_.c_str());
+        delete this->file_;
+        this->file_ = nullptr;
+    }
 }
 
 
@@ -172,10 +284,9 @@ enum {
 };
 typedef hsize_t DataspaceIndex[kDsDim];
 
-herr_t RecorderWorker::initHDF5(const std::string& hdf5)
+herr_t RecorderWorker::initHDF5()
 {
-    MLPD_INFO("Creating output HD5F file: %s\n", hdf5.c_str());
-    this->hdf5_name_ = hdf5;
+    MLPD_INFO("Creating output HD5F file: %s\n", this->hdf5_name_.c_str());
 
     // dataset dimension
     hsize_t IQ = 2 * this->cfg_->samps_per_symbol();
@@ -184,17 +295,17 @@ herr_t RecorderWorker::initHDF5(const std::string& hdf5)
     this->frame_number_pilot_ = MAX_FRAME_INC; //this->cfg_->maxFrame;
     DataspaceIndex dims_pilot = { this->frame_number_pilot_,
         this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-        this->cfg_->getMaxNumAntennas(), IQ };
+        this->antennas_.size(), IQ };
     DataspaceIndex max_dims_pilot = { H5S_UNLIMITED, this->cfg_->num_cells(),
-        this->cfg_->pilot_syms_per_frame(), this->cfg_->getMaxNumAntennas(),
+        this->cfg_->pilot_syms_per_frame(), this->antennas_.size(),
         IQ };
 
     this->frame_number_data_ = MAX_FRAME_INC; //this->cfg_->maxFrame;
     DataspaceIndex dims_data = { this->frame_number_data_,
         this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
-        this->cfg_->getMaxNumAntennas(), IQ };
+        this->antennas_.size(), IQ };
     DataspaceIndex max_dims_data = { H5S_UNLIMITED, this->cfg_->num_cells(),
-        this->cfg_->ul_syms_per_frame(), this->cfg_->getMaxNumAntennas(), IQ };
+        this->cfg_->ul_syms_per_frame(), this->antennas_.size(), IQ };
 
     try {
         H5::Exception::dontPrint();
@@ -242,7 +353,6 @@ herr_t RecorderWorker::initHDF5(const std::string& hdf5)
         write_attribute(mainGroup, "PILOT_SEQ_TYPE", this->cfg_->pilot_seq());
 
         // ******* Base Station ******** //
-
         // Hub IDs (vec of strings)
         write_attribute(mainGroup, "BS_HUB_ID", this->cfg_->hub_ids());
 
@@ -435,7 +545,7 @@ herr_t RecorderWorker::initHDF5(const std::string& hdf5)
 
 void RecorderWorker::openHDF5()
 {
-    MLPD_TRACE("Open HDF5 file\n");
+    MLPD_TRACE("Open HDF5 file: %s\n", this->hdf5_name_.c_str());
     this->file_->openFile(this->hdf5_name_, H5F_ACC_RDWR);
     assert(this->pilot_dataset_ == nullptr);
     // Get Dataset for pilot and check the shape of it
@@ -452,7 +562,7 @@ void RecorderWorker::openHDF5()
     int ndims = pilot_filespace.getSimpleExtentNdims();
     DataspaceIndex dims_pilot = { this->frame_number_pilot_,
         this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-        this->cfg_->getMaxNumAntennas(), IQ };
+        this->antennas_.size(), IQ };
     if (H5D_CHUNKED == this->pilot_prop_.getLayout())
         cndims_pilot = this->pilot_prop_.getChunk(ndims, dims_pilot);
     using std::cout;
@@ -482,7 +592,7 @@ void RecorderWorker::openHDF5()
         cout << "dim data chunk = " << cndims_data << std::endl;
         DataspaceIndex dims_data = { this->frame_number_data_,
             this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
-            this->cfg_->getMaxNumAntennas(), IQ };
+            this->antennas_.size(), IQ };
         cout << "New Data Dataset Dimension " << ndims << ",";
         for (auto i = 0; i < kDsSim - 1; ++i)
             cout << dims_pilot[i] << ",";
@@ -494,40 +604,51 @@ void RecorderWorker::openHDF5()
 
 void RecorderWorker::closeHDF5()
 {
-    MLPD_TRACE("Close HD5F file\n");
-    unsigned frame_number = this->max_frame_number_;
-    hsize_t IQ = 2 * this->cfg_->samps_per_symbol();
+    MLPD_TRACE("Close HD5F file: %s\n", this->hdf5_name_.c_str());
 
-    // Resize Pilot Dataset
-    this->frame_number_pilot_ = frame_number;
-    DataspaceIndex dims_pilot = { this->frame_number_pilot_,
-        this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-        this->cfg_->getMaxNumAntennas(), IQ };
-    this->pilot_dataset_->extend(dims_pilot);
-    this->pilot_prop_.close();
-    this->pilot_dataset_->close();
-    delete this->pilot_dataset_;
-    this->pilot_dataset_ = nullptr;
-
-    // Resize Data Dataset (If Needed)
-    if (this->cfg_->ul_syms_per_frame() > 0) {
-        this->frame_number_data_ = frame_number;
-        DataspaceIndex dims_data = { this->frame_number_data_,
-            this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
-            this->cfg_->getMaxNumAntennas(), IQ };
-        this->data_dataset_->extend(dims_data);
-        this->data_prop_.close();
-        this->data_dataset_->close();
-        delete this->data_dataset_;
-        this->data_dataset_ = nullptr;
+    if (this->file_ == nullptr)
+    {
+        MLPD_WARN("File does not exist while calling close: %s\n", this->hdf5_name_.c_str());
     }
+    else
+    {
+        unsigned frame_number = this->max_frame_number_;
+        hsize_t IQ = 2 * this->cfg_->samps_per_symbol();
 
-    this->file_->close();
-    MLPD_INFO("Saving HD5F: %d frames saved\n", frame_number);
+        assert(this->pilot_dataset_ != nullptr);
+        // Resize Pilot Dataset
+        this->frame_number_pilot_ = frame_number;
+        DataspaceIndex dims_pilot = { this->frame_number_pilot_,
+            this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
+            this->antennas_.size(), IQ };
+        this->pilot_dataset_->extend(dims_pilot);
+        this->pilot_prop_.close();
+        this->pilot_dataset_->close();
+        delete this->pilot_dataset_;
+        this->pilot_dataset_ = nullptr;
+
+        // Resize Data Dataset (If Needed)
+        if (this->cfg_->ul_syms_per_frame() > 0) {
+            assert(this->data_dataset_ != nullptr);
+            this->frame_number_data_ = frame_number;
+            DataspaceIndex dims_data = { this->frame_number_data_,
+                this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
+                this->antennas_.size(), IQ };
+            this->data_dataset_->extend(dims_data);
+            this->data_prop_.close();
+            this->data_dataset_->close();
+            delete this->data_dataset_;
+            this->data_dataset_ = nullptr;
+        }
+
+        this->file_->close();
+        MLPD_INFO("Saving HD5F: %d frames saved\n", frame_number);
+    }
 }
 
-herr_t RecorderWorker::record(int tid, int antenna, Package *pkg)
+herr_t RecorderWorker::record(int , Package *pkg)
 {
+    /* check pkg->ant_id to see if it is in our span */
     herr_t ret = 0;
 
     //Generates a ton of messages
@@ -575,7 +696,7 @@ herr_t RecorderWorker::record(int tid, int antenna, Package *pkg)
                     DataspaceIndex dims_pilot
                         = { this->frame_number_pilot_, this->cfg_->num_cells(),
                               this->cfg_->pilot_syms_per_frame(),
-                              this->cfg_->getMaxNumAntennas(), IQ };
+                              this->antennas_.size(), IQ };
                     this->pilot_dataset_->extend(dims_pilot);
 #if DEBUG_PRINT
                     std::cout
@@ -609,7 +730,7 @@ herr_t RecorderWorker::record(int tid, int antenna, Package *pkg)
                     DataspaceIndex dims_data
                         = { this->frame_number_data_, this->cfg_->num_cells(),
                               this->cfg_->ul_syms_per_frame(),
-                              this->cfg_->getMaxNumAntennas(), IQ };
+                              this->antennas_.size(), IQ };
                     this->data_dataset_->extend(dims_data);
 #if DEBUG_PRINT
                     std::cout
@@ -648,7 +769,7 @@ herr_t RecorderWorker::record(int tid, int antenna, Package *pkg)
 
             DataspaceIndex dims_pilot = { this->frame_number_pilot_,
                 this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-                this->cfg_->getMaxNumAntennas(), IQ };
+                this->antennas_.size(), IQ };
             int ndims = this->data_dataset_->getSpace().getSimpleExtentNdims();
 
             std::stringstream ss;

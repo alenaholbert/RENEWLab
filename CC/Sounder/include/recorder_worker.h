@@ -19,14 +19,35 @@ class RecorderWorker
 {
 public:
     RecorderWorker(Config* in_cfg);
+    RecorderWorker(Config* in_cfg, const std::vector<unsigned>& antennas);
     ~RecorderWorker();
 
-    herr_t record(int tid, int antenna, Package *pkg);
+    struct EventHandlerContext {
+        RecorderWorker*      me;
+        size_t               id;
+    };
 
-    herr_t initHDF5(const std::string&);
-    void openHDF5();
-    void closeHDF5();
-    void finishHDF5();
+    struct RecordEventData {
+        int event_type;
+        int data;
+        SampleBuffer* rx_buffer;
+        size_t rx_buff_size;
+    };
+
+    void init( const std::vector<unsigned>& antennas );
+    void finalize( void );
+    herr_t record(int tid, Package *pkg);
+
+    /* Threading functions */
+    static void *launchThread(void *in_context);
+
+    //Main threading loop
+    void doRecording(int tid, int core_id);
+    //Dispatch work
+    bool dispatchWork(RecordEventData event);
+    //Tracks and frees the event memory buffer
+    void handleEvent(RecordEventData event, int tid);
+
 private:
 
     // pilot dataset size increment
@@ -35,9 +56,12 @@ private:
     static const int kConfigDataExtentStep;
 
     void gc( void );
+    herr_t initHDF5();
+    void openHDF5();
+    void closeHDF5();
+    void finishHDF5();
 
     Config* cfg_;
-
     H5std_string hdf5_name_;
 
     H5::H5File* file_;
@@ -52,6 +76,13 @@ private:
     size_t frame_number_data_;
 
     size_t max_frame_number_;
+
+    /* List of antennas the recorder will be responsable for */
+    std::vector<unsigned> antennas_;
+
+    //Threading helpers
+    //1 - Producer (dispatcher), 1 - Consumer
+    moodycamel::ConcurrentQueue<RecordEventData> event_queue_;
 };
 
 #endif /* RECORDER_WORKER_HEADER */

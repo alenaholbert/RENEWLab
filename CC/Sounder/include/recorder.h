@@ -24,12 +24,6 @@ public:
     std::string getTraceFileName() { return this->cfg_->trace_file(); }
 
 private:
-    struct EventHandlerContext {
-        Recorder* obj_ptr;
-        size_t id;
-    };
-    void taskThread(EventHandlerContext* context);
-    static void* taskThread_launch(void* in_context);
     void gc(void);
 
     // buffer length of each rx thread
@@ -48,8 +42,7 @@ private:
     hsize_t cdims_pilot[5];
     hsize_t cdims_data[5];
 #endif
-
-    moodycamel::ConcurrentQueue<Event_data> task_queue_;
+    //moodycamel::ConcurrentQueue<Event_data> task_queue_;
     moodycamel::ConcurrentQueue<Event_data> message_queue_;
 };
 #endif /* DATARECORDER_HEADER */

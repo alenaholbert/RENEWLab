@@ -24,18 +24,16 @@ const int kDsSim = 5;
 #endif
 
 
-Recorder::Recorder(Config* in_cfg) : worker_(in_cfg)
+Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg), worker_(in_cfg)
 {
-    cfg_ = in_cfg;
     size_t rx_thread_num = cfg_->rx_thread_num();
-    size_t task_thread_num = cfg_->task_thread_num();
     size_t ant_per_rx_thread
         = cfg_->bs_present() ? cfg_->getTotNumAntennas() / rx_thread_num : 1;
     rx_thread_buff_size_
         = kSampleBufferFrameNum * cfg_->symbols_per_frame() * ant_per_rx_thread;
 
-    task_queue_
-        = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
+    //task_queue_
+    //    = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
     message_queue_
         = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
 
@@ -64,27 +62,6 @@ Recorder::Recorder(Config* in_cfg) : worker_(in_cfg)
         gc();
         throw runtime_error("Error Setting up the Receiver");
     }
-
-    if (task_thread_num > 0) {
-        pthread_attr_t detached_attr;
-        pthread_attr_init(&detached_attr);
-        pthread_attr_setdetachstate(&detached_attr, PTHREAD_CREATE_DETACHED);
-
-        for (size_t i = 0; i < task_thread_num; i++) {
-            EventHandlerContext* context = new EventHandlerContext;
-            pthread_t task_thread;
-            context->obj_ptr = this;
-            context->id = i;
-            MLPD_TRACE("Launching task thread with id: %zu\n", i);
-            if (pthread_create(&task_thread, &detached_attr,
-                    Recorder::taskThread_launch, context)
-                != 0) {
-                delete context;
-                gc();
-                throw runtime_error("Task thread create failed");
-            }
-        }
-    }
 }
 
 void Recorder::gc(void)
@@ -103,6 +80,8 @@ Recorder::~Recorder() { this->gc(); }
 
 void Recorder::do_it()
 {
+    pthread_t worker_thread;
+
     MLPD_TRACE("Recorder work thread\n");
     if ((this->cfg_->core_alloc() == true) && (pin_to_core(0) != 0)) {
         MLPD_ERROR("pinning main thread to core 0 failed");
@@ -114,11 +93,35 @@ void Recorder::do_it()
     }
 
     if (this->cfg_->rx_thread_num() > 0) {
-        if (this->worker_.initHDF5(this->cfg_->trace_file()) < 0)
+        //This is the spot that will create the necessary workers and split up the work
+        std::vector<unsigned> antennas;
+        for (size_t i = 0; i < cfg_->getTotNumAntennas(); i++)
         {
-            throw std::runtime_error("Could not init the output file");
+            antennas.push_back(i);
         }
-        this->worker_.openHDF5();
+        worker_.init(antennas);
+
+        size_t task_thread_num = cfg_->task_thread_num();
+        if (task_thread_num > 0) {
+            pthread_attr_t detached_attr;
+            pthread_attr_init(&detached_attr);
+            pthread_attr_setdetachstate(&detached_attr, PTHREAD_CREATE_DETACHED);
+
+            //Configure the worker threads.
+            // TODO: add support for multiple workers
+            //for (size_t i = 0; i < task_thread_num; i++) {
+            RecorderWorker::EventHandlerContext* context = new RecorderWorker::EventHandlerContext();
+            context->me = &this->worker_;
+            context->id = 0;
+            MLPD_TRACE("Launching recorder task thread with id: %zu\n", i);
+            if (pthread_create(&worker_thread, &detached_attr,
+                    RecorderWorker::launchThread, context)
+                != 0) {
+                delete context;
+                gc();
+                throw runtime_error("Recorder task thread create failed");
+            }
+        }
 
         // create socket buffer and socket threads
         auto recv_thread
@@ -126,13 +129,14 @@ void Recorder::do_it()
     } else
         this->receiver_->go(); // only beamsweeping
 
-    moodycamel::ProducerToken ptok(this->task_queue_);
     moodycamel::ConsumerToken ctok(this->message_queue_);
 
     Event_data events_list[KDequeueBulkSize];
     int ret = 0;
+
+    /* TODO : we can probably remove the dispatch function and pass directly to the recievers */
     while ((this->cfg_->running() == true) && (SignalHandler::gotExitSignal() == false)) {
-        // get a bulk of events
+        // get a bulk of events from the receivers
         ret = this->message_queue_.try_dequeue_bulk(
             ctok, events_list, KDequeueBulkSize);
         //if (ret > 0)
@@ -143,76 +147,35 @@ void Recorder::do_it()
         for (int bulk_count = 0; bulk_count < ret; bulk_count++) {
             Event_data& event = events_list[bulk_count];
 
-            // if EVENT_RX_SYMBOL, do crop
+            // if EVENT_RX_SYMBOL, dispatch to proper worker
             if (event.event_type == EVENT_RX_SYMBOL) {
                 int offset = event.data;
-                Event_data do_record_task;
-                do_record_task.event_type = TASK_RECORD;
-                do_record_task.data = offset;
-                if (this->task_queue_.try_enqueue(ptok, do_record_task) == 0) {
-                    MLPD_WARN("Queue limit has reached! try to increase queue size.\n");
-                    if (this->task_queue_.enqueue(ptok, do_record_task) == 0) {
-                        MLPD_ERROR("Record task enqueue failed\n");
-                        throw std::runtime_error("Record task enqueue failed");
-                    }
+                RecorderWorker::RecordEventData do_record_task;
+                do_record_task.event_type   = TASK_RECORD;
+                do_record_task.data         = offset;
+                do_record_task.rx_buffer    = this->rx_buffer_;
+                do_record_task.rx_buff_size = this->rx_thread_buff_size_;
+                // Pass the work off to the applicable worker
+                // Worker must free the buffer, future work could involve making this cleaner
+
+                //If no worker threads, it is possible to handle the event directly.
+                //this->worker_.handleEvent(do_record_task, 0);
+                if ( this->worker_.dispatchWork(do_record_task) == false )
+                {
+                    MLPD_ERROR("Record task enqueue failed\n");
+                    throw std::runtime_error("Record task enqueue failed");
                 }
             }
         }
     }
     this->cfg_->running(false);
+    /* TODO: should we wait for the receive threads to terminate nicely? (recv_thread) */
     this->receiver_.reset();
-    if ((this->cfg_->bs_present() == true)
-        && (this->cfg_->rx_thread_num() > 0)) {
-        this->worker_.closeHDF5();
-    }
+
+    /* TODO join the worker threads before finalizing. */
+    pthread_join(worker_thread, NULL);
     if (this->cfg_->rx_thread_num() > 0) {
-        this->worker_.finishHDF5();
-    }
-}
-
-void* Recorder::taskThread_launch(void* in_context)
-{
-    EventHandlerContext* context = (EventHandlerContext*)in_context;
-    Recorder* recorder = context->obj_ptr;
-    recorder->taskThread(context);
-    return nullptr;
-}
-
-void Recorder::taskThread(EventHandlerContext* context)
-{
-    int tid = context->id;
-    delete context;
-    MLPD_TRACE("Task thread: %d started\n", tid);
-
-    Event_data event;
-    bool ret = false;
-    while (this->cfg_->running() == true) {
-        ret = this->task_queue_.try_dequeue(event);
-
-        if (ret == true)
-        {
-            size_t offset        = event.data;
-            size_t buffer_id     = (offset / this->rx_thread_buff_size_);
-            size_t buffer_offset = offset - (buffer_id * this->rx_thread_buff_size_);
-            
-            if (event.event_type == TASK_RECORD)
-            {
-                // read info
-                size_t package_length
-                    = sizeof(Package) + this->cfg_->getPackageDataLength();
-                char* cur_ptr_buffer = this->rx_buffer_[buffer_id].buffer.data()
-                    + (buffer_offset * package_length);
-
-                worker_.record(tid, 1, reinterpret_cast<Package*>(cur_ptr_buffer));
-            }
-
-            /* Free up the buffer memory */
-            int bit = 1 << (buffer_offset % sizeof(std::atomic_int));
-            int offs = (buffer_offset / sizeof(std::atomic_int));
-            std::atomic_fetch_and(
-                &this->rx_buffer_[buffer_id].pkg_buf_inuse[offs], ~bit); // now empty
-        }
-
+        this->worker_.finalize();
     }
 }
 
