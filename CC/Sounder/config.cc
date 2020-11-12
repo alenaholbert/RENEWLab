@@ -459,6 +459,7 @@ Config::Config(const std::string& jsonfile)
 
     // Multi-threading settings
     unsigned num_cores = this->getCoreCount();
+    MLPD_INFO("Cores found %u ... \n", num_cores);
     core_alloc_ = num_cores > RX_THREAD_NUM;
     if ((bs_present_ == true)
         && (pilot_syms_per_frame_ + ul_syms_per_frame_ > 0)) {
