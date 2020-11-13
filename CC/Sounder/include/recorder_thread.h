@@ -1,11 +1,9 @@
 /*
- Copyright (c) 2018-2019 
+ Copyright (c) 2018-2020
  RENEW OPEN SOURCE LICENSE: http://renew-wireless.org/license
- Author(s): Peiyao Zhao 
-            Rahman Doost-Mohamamdy, doost@rice.edu
  
 ----------------------------------------------------------------------
- Record received frames from massive-mimo base station in HDF5 format
+Event based message queue thread class for the recorder worker
 ---------------------------------------------------------------------
 */
 #ifndef SOUDER_RECORDER_THREAD_H_
@@ -21,6 +19,7 @@ namespace Sounder
         struct EventHandlerContext {
             RecorderThread*      me;
             size_t               id;
+            size_t             core;
         };
 
         struct RecordEventData {
@@ -33,7 +32,7 @@ namespace Sounder
         RecorderThread(Config* in_cfg, size_t buffer_size, std::vector<unsigned> antennas);
         ~RecorderThread();
 
-        pthread_t create(int tid);
+        pthread_t create(int tid, int core);
         bool      dispatchWork(RecordEventData event);
     private:
         static void *launchThread(void *in_context);

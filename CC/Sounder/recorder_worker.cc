@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2018-2019, Rice University 
+ Copyright (c) 2018-2020, Rice University 
  RENEW OPEN SOURCE LICENSE: http://renew-wireless.org/license
 
 ----------------------------------------------------------------------
- Record received frames from massive-mimo base station in HDF5 format
+ Class to handle writting data to an hdf5 file
 ---------------------------------------------------------------------
 */
 
@@ -66,16 +66,13 @@ namespace Sounder
 
     void RecorderWorker::init( void )
     {
-        //Old logic, probably remove
-        //Add the antenna offsets to file name here.
-        if (this->cfg_->rx_thread_num() > 0) {
-            this->hdf5_name_ = this->cfg_->trace_file();
-            if (this->initHDF5() < 0)
-            {
-                throw std::runtime_error("Could not init the output file");
-            }
-            this->openHDF5();
+        //TODO: Add the antenna offsets to file name here.
+        this->hdf5_name_ = this->cfg_->trace_file();
+        if (this->initHDF5() < 0)
+        {
+            throw std::runtime_error("Could not init the output file");
         }
+        this->openHDF5();
     }
 
     void RecorderWorker::finalize( void )

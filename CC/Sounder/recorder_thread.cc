@@ -1,9 +1,9 @@
 /*
- Copyright (c) 2018-2019, Rice University 
+ Copyright (c) 2018-2020, Rice University 
  RENEW OPEN SOURCE LICENSE: http://renew-wireless.org/license
 
-----------------------------------------------------------------------
- Record received frames from massive-mimo base station in HDF5 format
+---------------------------------------------------------------------
+ Event based message queue thread class for the recorder worker
 ---------------------------------------------------------------------
 */
 
@@ -34,7 +34,7 @@ namespace Sounder
 
     //TODO move to std::thread or allow a attr to be passed in
     // should the tid be private member, and create thread takes no params??
-    pthread_t RecorderThread::create(int tid)
+    pthread_t RecorderThread::create(int tid, int core)
     {
         assert(this->thread_ == 0); //Cannot call 2 times.
         pthread_attr_t joinable_attr;
@@ -44,6 +44,7 @@ namespace Sounder
         RecorderThread::EventHandlerContext* context = new RecorderThread::EventHandlerContext();
         context->me = this;
         context->id = tid;
+        context->core = core;
         MLPD_TRACE("Launching recorder task thread with id: %d\n", tid);
         if (pthread_create(&this->thread_, &joinable_attr,
                 RecorderThread::launchThread, context)
@@ -77,8 +78,9 @@ namespace Sounder
         
         auto me  = context->me;
         auto tid = context->id;
+        auto core = context->core;
         delete context;
-        me->doRecording(tid, 0);
+        me->doRecording(tid, core);
         return nullptr;
     }
 

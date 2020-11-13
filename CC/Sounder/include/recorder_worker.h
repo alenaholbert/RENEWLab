@@ -1,11 +1,9 @@
 /*
- Copyright (c) 2018-2019 
+ Copyright (c) 2018-2020
  RENEW OPEN SOURCE LICENSE: http://renew-wireless.org/license
- Author(s): Peiyao Zhao 
-            Rahman Doost-Mohamamdy, doost@rice.edu
  
 ----------------------------------------------------------------------
- Record received frames from massive-mimo base station in HDF5 format
+ Class to handle writting data to an hdf5 file
 ---------------------------------------------------------------------
 */
 #ifndef SOUDER_RECORDER_WORKER_H_

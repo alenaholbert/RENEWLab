@@ -497,7 +497,7 @@ Config::Config(const std::string& jsonfile)
         MLPD_INFO(
             "Allocating %zu cores to client threads ... \n", num_cl_sdrs_);
     }
-    running_ = true;
+    running_.store(true);
     MLPD_INFO("Configuration file was successfully parsed!\n");
 }
 

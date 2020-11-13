@@ -8,38 +8,41 @@
  Record received frames from massive-mimo base station in HDF5 format
 ---------------------------------------------------------------------
 */
-#ifndef DATARECORDER_HEADER
-#define DATARECORDER_HEADER
+#ifndef SOUDER_RECORDER_H_
+#define SOUDER_RECORDER_H_
 
 #include "receiver.h"
 #include "recorder_thread.h"
 
-class Recorder {
-public:
-    Recorder(Config* in_cfg);
-    ~Recorder();
+namespace Sounder
+{
+    class Recorder {
+    public:
+        Recorder(Config* in_cfg);
+        ~Recorder();
 
-    void do_it();
-    int getRecordedFrameNum();
-    std::string getTraceFileName() { return this->cfg_->trace_file(); }
+        void do_it();
+        int getRecordedFrameNum();
+        std::string getTraceFileName() { return this->cfg_->trace_file(); }
 
-private:
-    void gc(void);
+    private:
+        void gc(void);
 
-    // buffer length of each rx thread
-    static const int kSampleBufferFrameNum;
-    // dequeue bulk size, used to reduce the overhead of dequeue in main thread
-    static const int KDequeueBulkSize;
+        // buffer length of each rx thread
+        static const int kSampleBufferFrameNum;
+        // dequeue bulk size, used to reduce the overhead of dequeue in main thread
+        static const int KDequeueBulkSize;
 
-    Config* cfg_;
-    std::unique_ptr<Receiver> receiver_;
-    SampleBuffer* rx_buffer_;
-    size_t rx_thread_buff_size_;
+        Config* cfg_;
+        std::unique_ptr<Receiver> receiver_;
+        SampleBuffer* rx_buffer_;
+        size_t rx_thread_buff_size_;
 
-    //RecorderWorker worker_;
-    std::vector<Sounder::RecorderThread *> recorders_;
-    size_t max_frame_number_;
+        //RecorderWorker worker_;
+        std::vector<Sounder::RecorderThread *> recorders_;
+        size_t max_frame_number_;
 
-    moodycamel::ConcurrentQueue<Event_data> message_queue_;
+        moodycamel::ConcurrentQueue<Event_data> message_queue_;
+    };
 };
-#endif /* DATARECORDER_HEADER */
+#endif /* SOUDER_RECORDER_H_ */
