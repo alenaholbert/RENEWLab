@@ -402,6 +402,7 @@ void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
                 // push EVENT_RX_SYMBOL event into the queue
                 Event_data package_message;
                 package_message.event_type = EVENT_RX_SYMBOL;
+                package_message.ant_id     = ant_id + ch;
                 // data records the position of this packet in the buffer & tid of this socket
                 // (so that task thread could know which buffer it should visit)
                 package_message.data = cursor + tid * buffer_chunk_size;

@@ -6,7 +6,6 @@
  Record received frames from massive-mimo base station in HDF5 format
 ---------------------------------------------------------------------
 */
-
 #include "include/recorder.h"
 #include "include/logger.h"
 #include "include/macros.h"
@@ -25,10 +24,10 @@ namespace Sounder
     const int kDsSim = 5;
 #endif
 
-    static const int kQueueSize = 36;
+    static const int kQueueSize           = 36;
     static const int kRecorderCore        = 0;
     static const int kMainDispatchCore    = kRecorderCore + 1;
-    static const constexpr int kRecvCore  = (kMainDispatchCore * 1) + 1; /* This needs to be (kMainDispatchCore * threads) + 1 */
+    static const constexpr int kRecvCore  = (kMainDispatchCore + TASK_THREAD_NUM); /* This needs to be (kMainDispatchCore + threads) */
 
     Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg)
     {
@@ -82,6 +81,9 @@ namespace Sounder
 
     void Recorder::do_it()
     {
+        unsigned int recorder_threads = this->cfg_->rx_thread_num();
+        unsigned int total_antennas  = cfg_->getTotNumAntennas();
+        unsigned int thread_antennas = 0;
 
         MLPD_TRACE("Recorder work thread\n");
         if ((this->cfg_->core_alloc() == true) && (pin_to_core(kMainDispatchCore) != 0)) {
@@ -93,23 +95,28 @@ namespace Sounder
             auto client_threads = this->receiver_->startClientThreads();
         }
 
-        if (this->cfg_->rx_thread_num() > 0) {
-            //This is the spot that will create the necessary workers and split up the work
-            std::vector<unsigned> antennas;
-            for (size_t i = 0; i < cfg_->getTotNumAntennas(); i++)
-            {
-                antennas.push_back(i);
-            }
+        if (recorder_threads > 0) {
 
-            size_t task_thread_num = cfg_->task_thread_num();
-            if (task_thread_num > 0) {
-                //Configure the worker threads.
-                //TODO add antenna selection
-                for (size_t i = 0; i < task_thread_num; i++) {
-                    Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, antennas);
-                    new_recorder->create(i, kRecorderCore);
-                    this->recorders_.push_back(new_recorder);
+            thread_antennas = (total_antennas / recorder_threads);
+            // If antennas are left, distribute them over the threads. This may assign antennas that don't 
+            // exist to the threads at the end. This isn't a concern.
+            if ((total_antennas % recorder_threads) != 0)
+            {
+                thread_antennas = (thread_antennas + 1);
+            }
+            
+            for (unsigned int i = 0; i < recorder_threads; i++)
+            {
+                std::vector<unsigned int> antennas;
+                for (unsigned int j = 0; j < thread_antennas; j++)
+                {
+                    antennas.push_back((i * thread_antennas) + j);
                 }
+                MLPD_INFO("Creating recorder thread: %u, with antennas %u:%u", i, (i * thread_antennas), (i * thread_antennas) + recorder_threads);
+
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, antennas);
+                new_recorder->create(i, kRecorderCore);
+                this->recorders_.push_back(new_recorder);
             }
 
             // create socket buffer and socket threads
@@ -138,7 +145,7 @@ namespace Sounder
 
                 // if EVENT_RX_SYMBOL, dispatch to proper worker
                 if (event.event_type == EVENT_RX_SYMBOL) {
-                    size_t thread_index = 0; /* TODO WARNING: needs to be based on the antenna */
+                    size_t thread_index = event.ant_id / thread_antennas;
                     int offset          = event.data;
                     Sounder::RecorderThread::RecordEventData do_record_task;
                     do_record_task.event_type   = TASK_RECORD;

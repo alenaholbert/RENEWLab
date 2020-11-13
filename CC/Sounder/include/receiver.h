@@ -36,6 +36,7 @@ class ReceiverException : public std::exception {
 struct Event_data {
     int event_type;
     int data;
+    int ant_id; //TODO Remove?
 };
 
 struct Package {

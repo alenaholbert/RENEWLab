@@ -89,7 +89,6 @@ namespace Sounder
     bool RecorderThread::dispatchWork(RecordEventData event)
     {
         //MLPD_TRACE("Dispatching work\n");
-
         moodycamel::ProducerToken ptok(this->event_queue_);
         bool ret = true;
         if (this->event_queue_.try_enqueue(ptok, event) == 0) {

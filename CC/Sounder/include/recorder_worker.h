@@ -54,7 +54,7 @@ namespace Sounder
         size_t max_frame_number_;
 
         /* List of antennas the recorder will be responsable for */
-        std::vector<unsigned> antennas_;
+        std::vector<unsigned int> antennas_;
     };
 }; /* End namespace Sounder */
 
