@@ -14,12 +14,16 @@
 
 namespace Sounder
 {
-    RecorderThread::RecorderThread(Config* in_cfg, std::vector<unsigned> antennas) : worker_(in_cfg, antennas)
-    {
-        cfg_ = in_cfg;
-        thread_ = 0;
-        worker_.init();
+    static const size_t kQueueSize = 36;
 
+    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, std::vector<unsigned> antennas) : 
+        worker_(in_cfg, antennas),
+        cfg_(in_cfg),
+        thread_(0)
+    {
+        buffer_size_ = buffer_size;
+        worker_.init();
+        event_queue_ = moodycamel::ConcurrentQueue<RecordEventData>(buffer_size_ * kQueueSize);
         /* Should we create the thread here?  maybe */
     }
 
@@ -32,16 +36,16 @@ namespace Sounder
     // should the tid be private member, and create thread takes no params??
     pthread_t RecorderThread::create(int tid)
     {
-        assert(this->thread_ != 0); //Cannot call 2 times.
-        pthread_attr_t detached_attr;
-        pthread_attr_init(&detached_attr);
-        pthread_attr_setdetachstate(&detached_attr, PTHREAD_CREATE_DETACHED);
+        assert(this->thread_ == 0); //Cannot call 2 times.
+        pthread_attr_t joinable_attr;
+        pthread_attr_init(&joinable_attr);
+        pthread_attr_setdetachstate(&joinable_attr, PTHREAD_CREATE_JOINABLE); //DETACHED
 
         RecorderThread::EventHandlerContext* context = new RecorderThread::EventHandlerContext();
         context->me = this;
         context->id = tid;
         MLPD_TRACE("Launching recorder task thread with id: %d\n", tid);
-        if (pthread_create(&this->thread_, &detached_attr,
+        if (pthread_create(&this->thread_, &joinable_attr,
                 RecorderThread::launchThread, context)
             != 0) {
             delete context;
@@ -61,6 +65,7 @@ namespace Sounder
 
     int RecorderThread::join( void )
     {
+        MLPD_TRACE("Joining Recorder Thread %d\n", (int)this->thread_);
         return pthread_join(this->thread_, NULL);
     }
 
@@ -81,7 +86,7 @@ namespace Sounder
     //Returns true for success, false otherwise
     bool RecorderThread::dispatchWork(RecordEventData event)
     {
-        MLPD_INFO("Dispatching work\n");
+        //MLPD_TRACE("Dispatching work\n");
 
         moodycamel::ProducerToken ptok(this->event_queue_);
         bool ret = true;

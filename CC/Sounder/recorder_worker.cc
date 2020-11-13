@@ -89,7 +89,7 @@ namespace Sounder
         MLPD_TRACE("Finish HD5F file\n");
         if (this->file_ != nullptr)
         {
-            MLPD_TRACE("Deleting the file ptr for :%s\n", hdf5_name_.c_str());
+            MLPD_TRACE("Deleting the file ptr for: %s\n", hdf5_name_.c_str());
             delete this->file_;
             this->file_ = nullptr;
         }
@@ -568,8 +568,7 @@ namespace Sounder
         herr_t ret = 0;
 
         //Generates a ton of messages
-        MLPD_TRACE( "Tid: %d -- frame_id %u, antenna: %u",
-                    tid, pkg->frame_id, pkg->ant_id);
+        //MLPD_TRACE( "Tid: %d -- frame_id %u, antenna: %u\n", tid, pkg->frame_id, pkg->ant_id);
 
     #if DEBUG_PRINT
         printf("record            frame %d, symbol %d, cell %d, ant %d samples: %d "

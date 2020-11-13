@@ -32,8 +32,6 @@ Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg)
     rx_thread_buff_size_
         = kSampleBufferFrameNum * cfg_->symbols_per_frame() * ant_per_rx_thread;
 
-    //task_queue_
-    //    = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
     message_queue_
         = moodycamel::ConcurrentQueue<Event_data>(rx_thread_buff_size_ * 36);
 
@@ -102,7 +100,7 @@ void Recorder::do_it()
             //Configure the worker threads.
             //TODO add antenna selection
             for (size_t i = 0; i < task_thread_num; i++) {
-                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, antennas);
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, antennas);
                 new_recorder->create(i);
                 this->recorders_.push_back(new_recorder);
             }
@@ -161,6 +159,7 @@ void Recorder::do_it()
     /* Force the recorders to finish the data they have left and exit cleanly*/
     for( auto recorder : this->recorders_)
     {
+        MLPD_TRACE("Deleting recorder\n");
         delete recorder;
     }
     this->recorders_.clear();
