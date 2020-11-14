@@ -31,7 +31,7 @@
 #include <unistd.h>
 #include <vector>
 
-int pin_thread_to_core(int core_id, pthread_t *thread_to_pin);
+int pin_thread_to_core(int core_id, pthread_t &thread_to_pin);
 int pin_to_core(int core_id);
 
 class Utils {

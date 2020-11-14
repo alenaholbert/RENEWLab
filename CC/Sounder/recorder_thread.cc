@@ -16,29 +16,42 @@ namespace Sounder
 {
     static const size_t kQueueSize = 36;
 
-    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas, int tid, int core ) : 
+    RecorderThread::RecorderThread( Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas ) : 
         worker_(in_cfg, antenna_offset, num_antennas),
-        cfg_(in_cfg)
+        cfg_(in_cfg),
+        thread_()
     {
         buffer_size_ = buffer_size;
         worker_.init();
         event_queue_ = moodycamel::ConcurrentQueue<RecordEventData>(buffer_size_ * kQueueSize);
-
-        MLPD_INFO("Launching recorder task thread with id: %d and core %d\n", tid, core);
-        this->thread_ = std::thread(&RecorderThread::doRecording, this, tid, core);
+        running_ = false;
     }
 
     RecorderThread::~RecorderThread()
     {
-        finalize();
+        Finalize();
     }
 
-    void RecorderThread::finalize( void )
+    //Launching thread in seperate function to guarantee that the object is fully constructed
+    //before calling member function
+    void RecorderThread::Start(int tid, int core)
+    {
+        MLPD_INFO("Launching recorder task thread with id: %d and core %d\n", tid, core);
+        {
+            std::lock_guard<std::mutex> thread_lock(this->sync_);
+            this->thread_  = std::thread(&RecorderThread::DoRecording, this, tid, core);
+            this->running_ = true;
+        }
+        this->condition_.notify_all();
+    }
+
+
+    void RecorderThread::Finalize( void )
     {
         //Wait for thread to cleanly finish the messages in the queue
         if (this->thread_.joinable() == true)
         {
-            MLPD_TRACE("Joining Recorder Thread\n");
+            MLPD_TRACE("Joining Recorder Thread on CPU %d \n", sched_getcpu());
             this->thread_.join();
         }
         this->worker_.finalize();
@@ -46,7 +59,7 @@ namespace Sounder
 
     /* TODO:  handle producer token better */
     //Returns true for success, false otherwise
-    bool RecorderThread::dispatchWork(RecordEventData event)
+    bool RecorderThread::DispatchWork(RecordEventData event)
     {
         //MLPD_TRACE("Dispatching work\n");
         moodycamel::ProducerToken ptok(this->event_queue_);
@@ -62,12 +75,21 @@ namespace Sounder
         return ret;
     }
 
-    void RecorderThread::doRecording(int tid, int core_id)
+    void RecorderThread::DoRecording(int tid, int core_id)
     {
+        pthread_t this_thread;
+
+        //Sync the start
+        {
+            std::unique_lock<std::mutex> thread_wait(this->sync_);
+            this->condition_.wait(thread_wait, [this]{ return this->running_; });
+        }
+
         if (this->cfg_->core_alloc() == true) {
             MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
-            pthread_t this_thread = this->thread_.native_handle();
-            if (pin_thread_to_core((core_id + tid), &this_thread) != 0) {
+            this_thread = this->thread_.native_handle();
+            MLPD_INFO("ThreadID %zu\n", (size_t)this_thread);
+            if (pin_thread_to_core((core_id + tid), this_thread) != 0) {
                 MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
                 throw std::runtime_error("Pin recording thread to core failed");
             }
@@ -83,12 +105,12 @@ namespace Sounder
 
             if (ret == true)
             {
-                this->handleEvent(event, tid);
+                this->HandleEvent(event, tid);
             }
         }
     }
 
-    void RecorderThread::handleEvent(RecordEventData event, int tid)
+    void RecorderThread::HandleEvent(RecordEventData event, int tid)
     {
         size_t offset        = event.data;
         size_t buffer_id     = (offset / event.rx_buff_size);

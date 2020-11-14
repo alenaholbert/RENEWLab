@@ -108,7 +108,8 @@ namespace Sounder
             for (unsigned int i = 0u; i < recorder_threads; i++)
             {
                 MLPD_INFO("Creating recorder thread: %u, with antennas %zu:%zu total %zu\n", i, (i * thread_antennas), ((i + 1) * thread_antennas) -1, thread_antennas);
-                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, (i * thread_antennas), thread_antennas, i, kRecorderCore);
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, (i * thread_antennas), thread_antennas);
+                new_recorder->Start(i, kRecorderCore);
                 this->recorders_.push_back(new_recorder);
             }
 
@@ -150,7 +151,7 @@ namespace Sounder
 
                     //If no worker threads, it is possible to handle the event directly.
                     //this->worker_.handleEvent(do_record_task, 0);
-                    if ( this->recorders_.at(thread_index)->dispatchWork(do_record_task) == false )
+                    if ( this->recorders_.at(thread_index)->DispatchWork(do_record_task) == false )
                     {
                         MLPD_ERROR("Record task enqueue failed\n");
                         throw std::runtime_error("Record task enqueue failed");

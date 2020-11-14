@@ -565,7 +565,7 @@ namespace Sounder
             }
 
             this->file_->close();
-            MLPD_INFO("Saving HD5F: %d frames saved\n", frame_number);
+            MLPD_INFO("Saving HD5F: %d frames saved on CPU %d\n", frame_number, sched_getcpu());
         }
     }
 

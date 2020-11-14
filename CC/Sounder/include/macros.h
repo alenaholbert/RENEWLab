@@ -10,13 +10,12 @@ static constexpr bool kUseUHD = false;
 static constexpr size_t kStreamContinuous = 1;
 static constexpr size_t kStreamEndBurst = 2;
 
-#define DEBUG_PRINT 0
-#define DEBUG_RADIO 0
-#define DEBUG_PLOT 0
+#define DEBUG_PRINT (0)
+#define DEBUG_RADIO (0)
+#define DEBUG_PLOT  (0)
 
-#define EVENT_RX_SYMBOL 0
-
-#define TASK_RECORD 0
+#define EVENT_RX_SYMBOL (0)
+#define TASK_RECORD     (0)
 
 // TASK & SOCKET thread number
 #define TASK_THREAD_NUM (1)
