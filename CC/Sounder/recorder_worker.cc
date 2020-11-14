@@ -335,8 +335,8 @@ namespace Sounder
             write_attribute(mainGroup, "BS_ANT_NUM_PER_CELL", bs_ant_num_per_cell);
 
             //If the antennas are non consective this will be an issue.
-            write_attribute(mainGroup, "START_ANT", (int)this->antennas_.at(0));
-            write_attribute(mainGroup, "END_ANT", (int)this->antennas_.at(this->antennas_.size()));
+            //write_attribute(mainGroup, "START_ANT", (int)this->antennas_.at(0));
+            //write_attribute(mainGroup, "END_ANT", (int)this->antennas_.at(this->antennas_.size()));
 
             // Number of symbols in a frame
             write_attribute(
@@ -576,13 +576,11 @@ namespace Sounder
         unsigned int start_antenna = this->antennas_.at(0);
         unsigned int end_antenna   = this->antennas_.at(this->antennas_.size() - 1);
 
-        if ((pkg->ant_id >= start_antenna) && (pkg->ant_id <= end_antenna))
+        if ((pkg->ant_id < start_antenna) || (pkg->ant_id > end_antenna))
         {
             MLPD_ERROR("Antenna id is not within range of this recorder %d, %d:%d", pkg->ant_id, start_antenna, end_antenna);
         }
-        assert(pkg->ant_id >= start_antenna);
-        assert(pkg->ant_id <= end_antenna);
-
+        assert((pkg->ant_id >= start_antenna) && (pkg->ant_id <= end_antenna));
 
         /* check pkg->ant_id to see if it is in our span */
         herr_t ret = 0;

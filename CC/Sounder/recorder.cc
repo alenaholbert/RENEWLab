@@ -25,9 +25,9 @@ namespace Sounder
 #endif
 
     static const int kQueueSize           = 36;
-    static const int kRecorderCore        = 0;
-    static const int kMainDispatchCore    = kRecorderCore + 1;
-    static const constexpr int kRecvCore  = (kMainDispatchCore + TASK_THREAD_NUM); /* This needs to be (kMainDispatchCore + threads) */
+    static const int kMainDispatchCore    = 0;
+    static const int kRecorderCore        = kMainDispatchCore + 1;
+    static const constexpr int kRecvCore  = (kRecorderCore + TASK_THREAD_NUM); /* This needs to be (kMainDispatchCore + threads) */
 
     Recorder::Recorder(Config* in_cfg) : cfg_(in_cfg)
     {
@@ -81,7 +81,7 @@ namespace Sounder
 
     void Recorder::do_it()
     {
-        unsigned int recorder_threads = this->cfg_->rx_thread_num();
+        unsigned int recorder_threads = this->cfg_->task_thread_num();
         unsigned int total_antennas  = cfg_->getTotNumAntennas();
         unsigned int thread_antennas = 0;
 
@@ -95,7 +95,7 @@ namespace Sounder
             auto client_threads = this->receiver_->startClientThreads();
         }
 
-        if (recorder_threads > 0) {
+        if (this->cfg_->rx_thread_num() > 0) {
 
             thread_antennas = (total_antennas / recorder_threads);
             // If antennas are left, distribute them over the threads. This may assign antennas that don't 
@@ -105,15 +105,14 @@ namespace Sounder
                 thread_antennas = (thread_antennas + 1);
             }
             
-            for (unsigned int i = 0; i < recorder_threads; i++)
+            for (unsigned int i = 0u; i < recorder_threads; i++)
             {
                 std::vector<unsigned int> antennas;
-                for (unsigned int j = 0; j < thread_antennas; j++)
+                for (unsigned int j = 0u; j < thread_antennas; j++)
                 {
                     antennas.push_back((i * thread_antennas) + j);
                 }
-                MLPD_INFO("Creating recorder thread: %u, with antennas %u:%u", i, (i * thread_antennas), (i * thread_antennas) + recorder_threads);
-
+                MLPD_INFO("Creating recorder thread: %u, with antennas %u:%u total %u\n", i, (i * thread_antennas), ((i + 1) * thread_antennas) -1, thread_antennas);
                 Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, antennas);
                 new_recorder->create(i, kRecorderCore);
                 this->recorders_.push_back(new_recorder);
