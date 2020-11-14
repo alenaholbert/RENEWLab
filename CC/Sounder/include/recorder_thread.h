@@ -16,12 +16,6 @@ namespace Sounder
     class RecorderThread
     {
     public:
-        struct EventHandlerContext {
-            RecorderThread*      me;
-            size_t               id;
-            size_t             core;
-        };
-
         struct RecordEventData {
             int event_type;
             int data;
@@ -29,25 +23,22 @@ namespace Sounder
             size_t rx_buff_size;
         };
 
-        RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas);
+        RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas, int tid, int core);
         ~RecorderThread();
 
-        pthread_t create(int tid, int core);
-        bool      dispatchWork(RecordEventData event);
+        void   create(int tid, int core);
+        bool   dispatchWork(RecordEventData event);
     private:
-        static void *launchThread(void *in_context);
-
         //Main threading loop        //Main threading loop
         void doRecording(int tid, int core_id);
         void handleEvent(RecordEventData event, int tid);
-        int  join();
-        int  finalize();
+        void finalize();
 
         //1 - Producer (dispatcher), 1 - Consumer
         moodycamel::ConcurrentQueue<RecordEventData> event_queue_;
         RecorderWorker worker_;
         Config* cfg_;
-        pthread_t thread_;
+        std::thread thread_;
         size_t buffer_size_;
     };
 };

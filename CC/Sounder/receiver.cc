@@ -159,10 +159,10 @@ void* Receiver::loopRecv_launch(void* in_context)
 void Receiver::loopRecv(int tid, int core_id, SampleBuffer* rx_buffer)
 {
     if (config_->core_alloc() == true) {
-        MLPD_INFO("Pinning thread %d to core %d\n", tid, core_id + tid);
+        MLPD_INFO("Pinning rx thread %d to core %d\n", tid, core_id + tid);
         if (pin_to_core(core_id + tid) != 0) {
-            MLPD_ERROR("Pin thread %d to core %d failed\n", tid, core_id + tid);
-            throw std::runtime_error("Pin thread to core failed");
+            MLPD_ERROR("Pin rx thread %d to core %d failed\n", tid, core_id + tid);
+            throw std::runtime_error("Pin rx thread to core failed");
         }
     }
 
@@ -456,13 +456,13 @@ void Receiver::clientTxRx(int tid)
     if (config_->core_alloc() == true) {
         int core
             = tid + 1 + config_->rx_thread_num() + config_->task_thread_num();
-        MLPD_INFO("Pinning client thread %d to core %d\n", tid, core);
+        MLPD_INFO("Pinning client TxRx thread %d to core %d\n", tid, core);
         if (pin_to_core(core) != 0) {
             MLPD_ERROR(
-                "Pin client thread %d to core %d failed in client txrx\n", tid,
+                "Pin client TxRx thread %d to core %d failed in client txrx\n", tid,
                 core);
             throw std::runtime_error(
-                "Pin client thread to core failed in client txr");
+                "Pin client TxRx thread to core failed in client txr");
         }
     }
 
@@ -538,10 +538,10 @@ void Receiver::clientSyncTxRx(int tid)
         int core
             = tid + 1 + config_->rx_thread_num() + config_->task_thread_num();
 
-        MLPD_INFO("Pinning client thread %d to core %d\n", tid, core);
+        MLPD_INFO("Pinning client synctxrx thread %d to core %d\n", tid, core);
         if (pin_to_core(core) != 0) {
-            MLPD_ERROR("Pin client thread %d to core %d failed\n", tid, core);
-            throw std::runtime_error("Failed to Pin client thread to core");
+            MLPD_ERROR("Pin client synctxrx thread %d to core %d failed\n", tid, core);
+            throw std::runtime_error("Failed to Pin client synctxrx thread to core");
         }
     }
 

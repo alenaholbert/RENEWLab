@@ -108,8 +108,7 @@ namespace Sounder
             for (unsigned int i = 0u; i < recorder_threads; i++)
             {
                 MLPD_INFO("Creating recorder thread: %u, with antennas %zu:%zu total %zu\n", i, (i * thread_antennas), ((i + 1) * thread_antennas) -1, thread_antennas);
-                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, (i * thread_antennas), thread_antennas);
-                new_recorder->create(i, kRecorderCore);
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, (i * thread_antennas), thread_antennas, i, kRecorderCore);
                 this->recorders_.push_back(new_recorder);
             }
 

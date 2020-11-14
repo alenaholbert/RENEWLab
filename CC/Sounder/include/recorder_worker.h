@@ -25,6 +25,9 @@ namespace Sounder
         void finalize( void );
         herr_t record(int tid, Package *pkg);
 
+        inline size_t num_antennas(void)   { return num_antennas_; }
+        inline size_t antenna_offset(void) { return antenna_offset_; }
+
     private:
         // pilot dataset size increment
         static const int kConfigPilotExtentStep;

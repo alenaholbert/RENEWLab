@@ -16,15 +16,16 @@ namespace Sounder
 {
     static const size_t kQueueSize = 36;
 
-    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas ) : 
+    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas, int tid, int core ) : 
         worker_(in_cfg, antenna_offset, num_antennas),
-        cfg_(in_cfg),
-        thread_(0)
+        cfg_(in_cfg)
     {
         buffer_size_ = buffer_size;
         worker_.init();
         event_queue_ = moodycamel::ConcurrentQueue<RecordEventData>(buffer_size_ * kQueueSize);
-        /* Should we create the thread here?  maybe */
+
+        MLPD_INFO("Launching recorder task thread with id: %d and core %d\n", tid, core);
+        this->thread_ = std::thread(&RecorderThread::doRecording, this, tid, core);
     }
 
     RecorderThread::~RecorderThread()
@@ -32,56 +33,15 @@ namespace Sounder
         finalize();
     }
 
-    //TODO move to std::thread or allow a attr to be passed in
-    // should the tid be private member, and create thread takes no params??
-    pthread_t RecorderThread::create(int tid, int core)
-    {
-        assert(this->thread_ == 0); //Cannot call 2 times.
-        pthread_attr_t joinable_attr;
-        pthread_attr_init(&joinable_attr);
-        pthread_attr_setdetachstate(&joinable_attr, PTHREAD_CREATE_JOINABLE); //DETACHED
-
-        RecorderThread::EventHandlerContext* context = new RecorderThread::EventHandlerContext();
-        context->me = this;
-        context->id = tid;
-        context->core = core;
-        MLPD_TRACE("Launching recorder task thread with id: %d\n", tid);
-        if (pthread_create(&this->thread_, &joinable_attr,
-                RecorderThread::launchThread, context)
-            != 0) {
-            delete context;
-            throw std::runtime_error("Recorder task thread create failed");
-        }
-        return this->thread_;
-    }
-
-    int RecorderThread::finalize( void )
+    void RecorderThread::finalize( void )
     {
         //Wait for thread to cleanly finish the messages in the queue
-        int ret = this->join();
-        //Close the files nicely
+        if (this->thread_.joinable() == true)
+        {
+            MLPD_TRACE("Joining Recorder Thread\n");
+            this->thread_.join();
+        }
         this->worker_.finalize();
-        return ret;
-    }
-
-    int RecorderThread::join( void )
-    {
-        MLPD_TRACE("Joining Recorder Thread %d\n", (int)this->thread_);
-        return pthread_join(this->thread_, NULL);
-    }
-
-
-    /* Static for all instances */
-    void* RecorderThread::launchThread(void *in_context)
-    {
-        EventHandlerContext* context = reinterpret_cast<EventHandlerContext*>(in_context);
-        
-        auto me  = context->me;
-        auto tid = context->id;
-        auto core = context->core;
-        delete context;
-        me->doRecording(tid, core);
-        return nullptr;
     }
 
     /* TODO:  handle producer token better */
@@ -106,14 +66,15 @@ namespace Sounder
     {
         if (this->cfg_->core_alloc() == true) {
             MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
-            if (pin_to_core(core_id + tid) != 0) {
+            pthread_t this_thread = this->thread_.native_handle();
+            if (pin_thread_to_core((core_id + tid), &this_thread) != 0) {
                 MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
                 throw std::runtime_error("Pin recording thread to core failed");
             }
         }
 
         moodycamel::ConsumerToken ctok(this->event_queue_);
-        MLPD_TRACE("Recording thread: %d started\n", tid);
+        MLPD_INFO("Recording thread %d has %zu antennas starting at %zu\n", tid, this->worker_.num_antennas(), this->worker_.antenna_offset());
 
         RecordEventData event;
         bool ret = false;
