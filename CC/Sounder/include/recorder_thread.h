@@ -29,7 +29,7 @@ namespace Sounder
             size_t rx_buff_size;
         };
 
-        RecorderThread(Config* in_cfg, size_t buffer_size, std::vector<unsigned> antennas);
+        RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas);
         ~RecorderThread();
 
         pthread_t create(int tid, int core);

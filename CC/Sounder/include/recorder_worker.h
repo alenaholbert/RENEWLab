@@ -18,7 +18,7 @@ namespace Sounder
     class RecorderWorker
     {
     public:
-        RecorderWorker(Config* in_cfg, const std::vector<unsigned>& antennas);
+        RecorderWorker(Config* in_cfg, size_t antenna_offset, size_t num_antennas);
         ~RecorderWorker();
 
         void init( void );
@@ -53,8 +53,8 @@ namespace Sounder
 
         size_t max_frame_number_;
 
-        /* List of antennas the recorder will be responsable for */
-        std::vector<unsigned int> antennas_;
+        size_t antenna_offset_;
+        size_t num_antennas_;
     };
 }; /* End namespace Sounder */
 

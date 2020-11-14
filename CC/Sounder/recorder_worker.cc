@@ -20,23 +20,23 @@ namespace Sounder
     // data dataset size increment
     const int RecorderWorker::kConfigDataExtentStep = 400;
 
-    #if (DEBUG_PRINT)
+#if (DEBUG_PRINT)
     const int kDsSim = 5;
-    #endif
+#endif
 
-
-    RecorderWorker::RecorderWorker(Config* in_cfg, const std::vector<unsigned>& antennas) : cfg_(in_cfg), antennas_(antennas)
+    RecorderWorker::RecorderWorker(Config* in_cfg, size_t antenna_offset, size_t num_antennas) : cfg_(in_cfg)
     {
         file_ = nullptr;
         pilot_dataset_ = nullptr;
         data_dataset_  = nullptr;
+        antenna_offset_ = antenna_offset;
+        num_antennas_   = num_antennas;
     }
 
     RecorderWorker::~RecorderWorker()
     {
         gc();
     }
-
 
     void RecorderWorker::gc(void)
     {
@@ -66,13 +66,11 @@ namespace Sounder
 
     void RecorderWorker::init( void )
     {
-        unsigned int start_antenna = this->antennas_.at(0);
-        unsigned int end_antenna   = this->antennas_.at(this->antennas_.size() - 1);
+        unsigned int end_antenna   = (this->antenna_offset_ + this->num_antennas_) -1;
 
-        //TODO: Add the antenna offsets to file name here.
         this->hdf5_name_ = this->cfg_->trace_file();
         size_t found_index = this->hdf5_name_.find_last_of('.');
-        std::string append = "_" + std::to_string(start_antenna) + "_" + std::to_string(end_antenna); 
+        std::string append = "_" + std::to_string(this->antenna_offset_) + "_" + std::to_string(end_antenna); 
         this->hdf5_name_.insert(found_index, append);
 
         if (this->initHDF5() < 0)
@@ -215,17 +213,17 @@ namespace Sounder
         this->frame_number_pilot_ = MAX_FRAME_INC; //this->cfg_->maxFrame;
         DataspaceIndex dims_pilot = { this->frame_number_pilot_,
             this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-            this->antennas_.size(), IQ };
+            this->num_antennas_, IQ };
         DataspaceIndex max_dims_pilot = { H5S_UNLIMITED, this->cfg_->num_cells(),
-            this->cfg_->pilot_syms_per_frame(), this->antennas_.size(),
+            this->cfg_->pilot_syms_per_frame(), this->num_antennas_,
             IQ };
 
         this->frame_number_data_ = MAX_FRAME_INC; //this->cfg_->maxFrame;
         DataspaceIndex dims_data = { this->frame_number_data_,
             this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
-            this->antennas_.size(), IQ };
+            this->num_antennas_, IQ };
         DataspaceIndex max_dims_data = { H5S_UNLIMITED, this->cfg_->num_cells(),
-            this->cfg_->ul_syms_per_frame(), this->antennas_.size(), IQ };
+            this->cfg_->ul_syms_per_frame(), this->num_antennas_, IQ };
 
         try {
             H5::Exception::dontPrint();
@@ -335,8 +333,9 @@ namespace Sounder
             write_attribute(mainGroup, "BS_ANT_NUM_PER_CELL", bs_ant_num_per_cell);
 
             //If the antennas are non consective this will be an issue.
-            //write_attribute(mainGroup, "START_ANT", (int)this->antennas_.at(0));
-            //write_attribute(mainGroup, "END_ANT", (int)this->antennas_.at(this->antennas_.size()));
+            write_attribute(mainGroup, "ANT_OFFSET", this->antenna_offset_);
+            write_attribute(mainGroup, "ANT_NUM", this->num_antennas_);
+            write_attribute(mainGroup, "ANT_TOTAL", this->cfg_->getTotNumAntennas());
 
             // Number of symbols in a frame
             write_attribute(
@@ -544,7 +543,7 @@ namespace Sounder
             this->frame_number_pilot_ = frame_number;
             DataspaceIndex dims_pilot = { this->frame_number_pilot_,
                 this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-                this->antennas_.size(), IQ };
+                this->num_antennas_, IQ };
             this->pilot_dataset_->extend(dims_pilot);
             this->pilot_prop_.close();
             this->pilot_dataset_->close();
@@ -557,7 +556,7 @@ namespace Sounder
                 this->frame_number_data_ = frame_number;
                 DataspaceIndex dims_data = { this->frame_number_data_,
                     this->cfg_->num_cells(), this->cfg_->ul_syms_per_frame(),
-                    this->antennas_.size(), IQ };
+                    this->num_antennas_, IQ };
                 this->data_dataset_->extend(dims_data);
                 this->data_prop_.close();
                 this->data_dataset_->close();
@@ -572,17 +571,16 @@ namespace Sounder
 
     herr_t RecorderWorker::record(int tid, Package *pkg)
     {
+        (void)tid;
         /* TODO: remove TEMP check */
-        unsigned int start_antenna = this->antennas_.at(0);
-        unsigned int end_antenna   = this->antennas_.at(this->antennas_.size() - 1);
+        size_t end_antenna   = (this->antenna_offset_ + this->num_antennas_) -1;
 
-        if ((pkg->ant_id < start_antenna) || (pkg->ant_id > end_antenna))
+        if ((pkg->ant_id < this->antenna_offset_) || (pkg->ant_id > end_antenna))
         {
-            MLPD_ERROR("Antenna id is not within range of this recorder %d, %d:%d", pkg->ant_id, start_antenna, end_antenna);
+            MLPD_ERROR("Antenna id is not within range of this recorder %d, %zu:%zu", pkg->ant_id, this->antenna_offset_, end_antenna);
         }
-        assert((pkg->ant_id >= start_antenna) && (pkg->ant_id <= end_antenna));
+        assert((pkg->ant_id >= this->antenna_offset_) && (pkg->ant_id <= end_antenna));
 
-        /* check pkg->ant_id to see if it is in our span */
         herr_t ret = 0;
 
         //Generates a ton of messages
@@ -613,8 +611,11 @@ namespace Sounder
                     this->max_frame_number_
                         = this->max_frame_number_ + MAX_FRAME_INC;
                 }
+
+                uint32_t antenna_index = pkg->ant_id - this->antenna_offset_;
+
                 DataspaceIndex hdfoffset
-                    = { pkg->frame_id, pkg->cell_id, 0, pkg->ant_id, 0 };
+                    = { pkg->frame_id, pkg->cell_id, 0, antenna_index, 0 };
                 if ((this->cfg_->reciprocal_calib() == true)
                     || (this->cfg_->isPilot(pkg->frame_id, pkg->symbol_id) == true)) {
                     assert(this->pilot_dataset_ != nullptr);
@@ -629,7 +630,7 @@ namespace Sounder
                         DataspaceIndex dims_pilot
                             = { this->frame_number_pilot_, this->cfg_->num_cells(),
                                 this->cfg_->pilot_syms_per_frame(),
-                                this->antennas_.size(), IQ };
+                                this->num_antennas_, IQ };
                         this->pilot_dataset_->extend(dims_pilot);
     #if DEBUG_PRINT
                         std::cout
@@ -663,7 +664,7 @@ namespace Sounder
                         DataspaceIndex dims_data
                             = { this->frame_number_data_, this->cfg_->num_cells(),
                                 this->cfg_->ul_syms_per_frame(),
-                                this->antennas_.size(), IQ };
+                                this->num_antennas_, IQ };
                         this->data_dataset_->extend(dims_data);
     #if DEBUG_PRINT
                         std::cout
@@ -702,7 +703,7 @@ namespace Sounder
 
                 DataspaceIndex dims_pilot = { this->frame_number_pilot_,
                     this->cfg_->num_cells(), this->cfg_->pilot_syms_per_frame(),
-                    this->antennas_.size(), IQ };
+                    this->num_antennas_, IQ };
                 int ndims = this->data_dataset_->getSpace().getSimpleExtentNdims();
 
                 std::stringstream ss;

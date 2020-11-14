@@ -81,9 +81,9 @@ namespace Sounder
 
     void Recorder::do_it()
     {
-        unsigned int recorder_threads = this->cfg_->task_thread_num();
-        unsigned int total_antennas  = cfg_->getTotNumAntennas();
-        unsigned int thread_antennas = 0;
+        size_t recorder_threads = this->cfg_->task_thread_num();
+        size_t total_antennas   = cfg_->getTotNumAntennas();
+        size_t thread_antennas  = 0;
 
         MLPD_TRACE("Recorder work thread\n");
         if ((this->cfg_->core_alloc() == true) && (pin_to_core(kMainDispatchCore) != 0)) {
@@ -107,13 +107,8 @@ namespace Sounder
             
             for (unsigned int i = 0u; i < recorder_threads; i++)
             {
-                std::vector<unsigned int> antennas;
-                for (unsigned int j = 0u; j < thread_antennas; j++)
-                {
-                    antennas.push_back((i * thread_antennas) + j);
-                }
-                MLPD_INFO("Creating recorder thread: %u, with antennas %u:%u total %u\n", i, (i * thread_antennas), ((i + 1) * thread_antennas) -1, thread_antennas);
-                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, antennas);
+                MLPD_INFO("Creating recorder thread: %u, with antennas %zu:%zu total %zu\n", i, (i * thread_antennas), ((i + 1) * thread_antennas) -1, thread_antennas);
+                Sounder::RecorderThread *new_recorder = new Sounder::RecorderThread(this->cfg_, this->rx_thread_buff_size_, (i * thread_antennas), thread_antennas);
                 new_recorder->create(i, kRecorderCore);
                 this->recorders_.push_back(new_recorder);
             }

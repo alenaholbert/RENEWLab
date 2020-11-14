@@ -16,8 +16,8 @@ namespace Sounder
 {
     static const size_t kQueueSize = 36;
 
-    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, std::vector<unsigned> antennas) : 
-        worker_(in_cfg, antennas),
+    RecorderThread::RecorderThread(Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas ) : 
+        worker_(in_cfg, antenna_offset, num_antennas),
         cfg_(in_cfg),
         thread_(0)
     {
