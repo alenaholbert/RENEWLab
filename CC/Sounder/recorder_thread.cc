@@ -14,7 +14,9 @@
 
 namespace Sounder
 {
-    static const size_t kQueueSize = 36;
+    static const size_t kQueueSize      = 36;
+    static const int kThreadTermination = 10;
+    static const int kNullEvent         = 11;
 
     RecorderThread::RecorderThread( Config* in_cfg, size_t buffer_size, size_t antenna_offset, size_t num_antennas ) : 
         worker_(in_cfg, antenna_offset, num_antennas),
@@ -24,7 +26,7 @@ namespace Sounder
         buffer_size_ = buffer_size;
         worker_.init();
         event_queue_ = moodycamel::ConcurrentQueue<RecordEventData>(buffer_size_ * kQueueSize);
-        running_ = false;
+        running_     = false;
     }
 
     RecorderThread::~RecorderThread()
@@ -45,6 +47,14 @@ namespace Sounder
         this->condition_.notify_all();
     }
 
+    /* Cleanly allows the thread to exit */
+    void RecorderThread::Stop( void )
+    {
+        RecordEventData event;
+        event.event_type = kThreadTermination;
+        this->DispatchWork(event);
+    }
+
 
     void RecorderThread::Finalize( void )
     {
@@ -52,6 +62,7 @@ namespace Sounder
         if (this->thread_.joinable() == true)
         {
             MLPD_TRACE("Joining Recorder Thread on CPU %d \n", sched_getcpu());
+            this->Stop();
             this->thread_.join();
         }
         this->worker_.finalize();
@@ -72,13 +83,17 @@ namespace Sounder
                 ret = false;
             }
         }
+
+        if (ret == true)
+        {
+            std::lock_guard<std::mutex> thread_lock(this->sync_);
+        }
+        this->condition_.notify_all();
         return ret;
     }
 
     void RecorderThread::DoRecording(int tid, int core_id)
     {
-        pthread_t this_thread;
-
         //Sync the start
         {
             std::unique_lock<std::mutex> thread_wait(this->sync_);
@@ -87,8 +102,7 @@ namespace Sounder
 
         if (this->cfg_->core_alloc() == true) {
             MLPD_INFO("Pinning recording thread %d to core %d\n", tid, core_id + tid);
-            this_thread = this->thread_.native_handle();
-            MLPD_INFO("ThreadID %zu\n", (size_t)this_thread);
+            pthread_t this_thread = this->thread_.native_handle();
             if (pin_thread_to_core((core_id + tid), this_thread) != 0) {
                 MLPD_ERROR("Pin recording thread %d to core %d failed\n", tid, core_id + tid);
                 throw std::runtime_error("Pin recording thread to core failed");
@@ -100,14 +114,28 @@ namespace Sounder
 
         RecordEventData event;
         bool ret = false;
-        while (this->cfg_->running() == true) {
+        event.event_type = kNullEvent;
+        while (this->running_ == true) {
             ret = this->event_queue_.try_dequeue(event);
 
-            if (ret == true)
+            if (ret == false) /* Queue empty */
             {
+                event.event_type = kNullEvent;
+                std::unique_lock<std::mutex> thread_wait(this->sync_);
+                this->condition_.wait(thread_wait, [this, &event]{ return this->event_queue_.try_dequeue(event); });
+            }
+
+            if (event.event_type == kThreadTermination)
+            {
+                this->running_ = false;
+            }
+            else
+            {
+                assert(event.event_type != kNullEvent);
                 this->HandleEvent(event, tid);
             }
         }
+        this->worker_.finalize();
     }
 
     void RecorderThread::HandleEvent(RecordEventData event, int tid)

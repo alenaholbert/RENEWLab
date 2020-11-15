@@ -29,6 +29,7 @@ namespace Sounder
         ~RecorderThread();
 
         void   Start(int tid, int core);
+        void   Stop( void );
         bool   DispatchWork(RecordEventData event);
     private:
         //Main threading loop        //Main threading loop

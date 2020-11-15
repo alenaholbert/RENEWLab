@@ -84,6 +84,7 @@ namespace Sounder
         size_t recorder_threads = this->cfg_->task_thread_num();
         size_t total_antennas   = cfg_->getTotNumAntennas();
         size_t thread_antennas  = 0;
+        std::vector<pthread_t> recv_threads;
 
         MLPD_TRACE("Recorder work thread\n");
         if ((this->cfg_->core_alloc() == true) && (pin_to_core(kMainDispatchCore) != 0)) {
@@ -114,7 +115,7 @@ namespace Sounder
             }
 
             // create socket buffer and socket threads
-            auto recv_thread
+            recv_threads
                 = this->receiver_->startRecvThreads(this->rx_buffer_, kRecvCore);
         } else
             this->receiver_->go(); // only beamsweeping
@@ -160,13 +161,17 @@ namespace Sounder
             }
         }
         this->cfg_->running(false);
-        /* TODO: should we wait for the receive threads to terminate nicely? (recv_thread) */
+        this->receiver_->completeRecvThreads(recv_threads);
         this->receiver_.reset();
 
-        /* Force the recorders to finish the data they have left and exit cleanly*/
+        /* Force the recorders to process all of the data they have left and exit cleanly
+         * Send a stop to all the recorders to allow the finalization to be done in parrallel */
         for( auto recorder : this->recorders_)
         {
-            MLPD_TRACE("Deleting recorder\n");
+            recorder->Stop();
+        }
+        for( auto recorder : this->recorders_)
+        {
             delete recorder;
         }
         this->recorders_.clear();

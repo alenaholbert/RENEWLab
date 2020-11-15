@@ -60,8 +60,6 @@ struct SampleBuffer {
     std::atomic_int* pkg_buf_inuse;
 };
 
-//class ClientRadioSet;
-
 class Receiver {
 public:
     // use for create pthread
